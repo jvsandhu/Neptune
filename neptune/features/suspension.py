@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from neptune.core import input as inp
 from neptune.core.module import FeatureModule
+from neptune.memory import offsets as O
 from neptune.ui import theme as T
 from neptune.ui.widgets.card import Banner, FieldRow, StatStrip, ToggleRow
 from neptune.ui.widgets.controls import BindButton, Segmented, SectionHeading
@@ -2078,6 +2079,17 @@ class SuspensionModule(FeatureModule):
 
         self._update_hydraulics_visibility()
 
+        friction_card = page.add_card(
+            "Tire friction", "Live per-wheel slip/friction, as the game reports it."
+        )
+        friction = StatStrip()
+        friction.add("friction_fl", "Front Left", "--")
+        friction.add("friction_fr", "Front Right", "--")
+        friction.add("friction_rr", "Rear Right", "--")
+        friction.add("friction_rl", "Rear Left", "--")
+        self._widgets["friction"] = friction
+        friction_card.add(friction)
+
         live_card = page.add_card("Live")
         stats = StatStrip()
         stats.add("state", "State", "Stock")
@@ -2096,6 +2108,19 @@ class SuspensionModule(FeatureModule):
         stats = self._widgets.get("stats")
         if stats is None:
             return
+
+        friction = self._widgets.get("friction")
+        if friction is not None:
+            values = vehicle.wheel_read(O.Wheels.FRICTION) if vehicle is not None else None
+            if values and len(values) == WHEEL_COUNT:
+                for key, value in zip(
+                    ("friction_fl", "friction_fr", "friction_rr", "friction_rl"),
+                    values,
+                    strict=True,
+                ):
+                    friction.set(key, f"{value:.2f}", unit="")
+            else:
+                friction.reset()
 
         if self._controls_dirty:
             self._controls_dirty = False

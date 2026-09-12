@@ -242,3 +242,23 @@ class MultiplierCarryTests(unittest.TestCase):
         self.assertFalse(module._lowered)
         self.assertEqual(module._front_percent,0.0)
         self.assertEqual(module._rear_percent,0.0)
+
+
+class FrictionReadoutTests(unittest.TestCase):
+    def test_refresh_shows_per_wheel_friction(self):
+        from neptune.features.suspension import SuspensionModule
+        class Settings:
+            def get(self,*args,**kwargs):return None
+            def __getattr__(self,name):return lambda *args,**kwargs:None
+        class Vehicle:
+            def wheel_read(self,field):return [0.11,0.22,0.33,0.44]
+        class Recorder:
+            def __init__(self):self.calls={}
+            def set(self,key,value,colour=None,unit=None):self.calls[key]=value
+            def reset(self):self.calls.clear()
+        module=SuspensionModule(Settings())
+        friction=Recorder()
+        module._widgets={"stats":Recorder(),"friction":friction}
+        module.refresh(Vehicle())
+        self.assertEqual(friction.calls.get("friction_fl"),"0.11")
+        self.assertEqual(friction.calls.get("friction_rl"),"0.44")
