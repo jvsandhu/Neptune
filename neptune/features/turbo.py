@@ -158,9 +158,9 @@ class TurboModule(FeatureModule):
             self._gear_count = count
             self._controls_dirty = True
 
-    def _capture_stock(self, vehicle) -> None:
+    def _capture_stock(self, vehicle, force: bool = False) -> None:
 
-        if vehicle is None or self._is_tuned():
+        if vehicle is None or (self._is_tuned() and not force):
             return
         values = vehicle.turbo_block()
         ceiling = values.get("max_boost")
@@ -172,17 +172,15 @@ class TurboModule(FeatureModule):
 
     def on_car_changed(self, vehicle) -> None:
         self._blower_peak = -999.0
-        self._multipliers = {key: 1.0 for key in self._multipliers}
-        self._min_boost_percent = 0.0
-        self._by_gear = False
-        self._gear_multipliers = {gear: 1.0 for gear in range(1, MAX_GEARS + 1)}
-        self._map_points = [1.0] * MAP_COLUMNS
-        self._map_enabled = False
+        # Keep the user's multipliers: they are relative, so they re-apply to the new car's
+        # own stock instead of carrying the old car's absolute values across. The new car
+        # is stock, so force the baseline capture even though the multipliers still read
+        # as "tuned".
         self._applied_signature = None
         self._stock_valid = False
         self._controls_dirty = True
         self.vehicle = vehicle
-        self._capture_stock(vehicle)
+        self._capture_stock(vehicle, force=True)
 
     def on_car_reloaded(self, vehicle) -> None:
         self.vehicle = vehicle
@@ -343,7 +341,7 @@ class TurboModule(FeatureModule):
         if vehicle is None:
             return
         if not self._stock_valid:
-            self._capture_stock(vehicle)
+            self._capture_stock(vehicle, force=True)
             self._read_gear_count(vehicle)
             self._read_rev_range(vehicle)
             return

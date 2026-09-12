@@ -189,3 +189,56 @@ class AutoAttachTests(unittest.TestCase):
         with patch('neptune.memory.process.game_is_running',return_value=False):
             Shell._auto_attach(fake)
         self.assertFalse(fake.called)
+
+
+class MultiplierCarryTests(unittest.TestCase):
+    """Engine torque and Turbo multipliers carry to the new car's own stock."""
+
+    def test_engine_keeps_torque_multiplier_and_recaptures_curve(self):
+        from neptune.features.engine import EngineModule
+        class Vehicle:
+            rev_ceiling=7500.0
+            redline=7300.0
+            def curve(self):return [1.0,2.0,3.0]
+        module=EngineModule(None)
+        module._torque_multiplier=1.2
+        module._custom_curve=[9.0,9.0]
+        module._rev_limit=7000.0
+        module.on_car_changed(Vehicle())
+        self.assertEqual(module._torque_multiplier,1.2)
+        self.assertIsNone(module._custom_curve)
+        self.assertIsNone(module._rev_limit)
+        self.assertEqual(module.stock_curve,[1.0,2.0,3.0])
+
+    def test_turbo_keeps_multipliers_and_takes_the_new_stock(self):
+        from neptune.features.turbo import TurboModule
+        class Settings:
+            def get(self,*args,**kwargs):return None
+            def __getattr__(self,name):return lambda *args,**kwargs:None
+        class Vehicle:
+            def turbo_block(self):
+                return {"max_boost":12.0,"max_scale":1.0,"low_airflow":1.0,"turbine_limit":1.0}
+        module=TurboModule(Settings())
+        module._multipliers["max_boost"]=1.2
+        module.stock={"max_boost":10.0};module._stock_valid=True
+        module.on_car_changed(Vehicle())
+        self.assertEqual(module._multipliers["max_boost"],1.2)
+        self.assertEqual(module.stock["max_boost"],12.0)
+        self.assertTrue(module._stock_valid)
+
+    def test_suspension_offsets_still_reset(self):
+        from neptune.features.suspension import SuspensionModule
+        class Settings:
+            def get(self,*args,**kwargs):return None
+            def __getattr__(self,name):return lambda *args,**kwargs:None
+        module=SuspensionModule(Settings())
+        module._lowered=True;module._front_percent=5.0;module._rear_percent=5.0
+        module._capture_stock=lambda vehicle:None
+        module._capture_camber_stock=lambda vehicle:None
+        module._capture_track_stock=lambda vehicle:None
+        module._capture_toe_stock=lambda vehicle:None
+        module._check_rear_axle=lambda vehicle:None
+        module.on_car_changed(object())
+        self.assertFalse(module._lowered)
+        self.assertEqual(module._front_percent,0.0)
+        self.assertEqual(module._rear_percent,0.0)

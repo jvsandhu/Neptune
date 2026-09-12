@@ -137,7 +137,9 @@ class EngineModule(FeatureModule):
         self._engaged = False
         self._ready = False
         self._launch_engaged = False
-        self._torque_multiplier = 1.0
+        # Keep the torque multiplier. It is a relative factor, so it re-applies to the new
+        # car's own stock curve instead of carrying the old car's absolute values across.
+        # The car-specific absolute state (rev limit, custom curve) is cleared.
         self._rev_limit = None
         self._custom_curve = None
         self._pending_edits.clear()
