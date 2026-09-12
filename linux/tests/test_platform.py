@@ -237,6 +237,7 @@ class MultiplierCarryTests(unittest.TestCase):
         module._capture_camber_stock=lambda vehicle:None
         module._capture_track_stock=lambda vehicle:None
         module._capture_toe_stock=lambda vehicle:None
+        module._capture_grip_stock=lambda vehicle:None
         module._check_rear_axle=lambda vehicle:None
         module.on_car_changed(object())
         self.assertFalse(module._lowered)
@@ -262,3 +263,63 @@ class FrictionReadoutTests(unittest.TestCase):
         module.refresh(Vehicle())
         self.assertEqual(friction.calls.get("friction_fl"),"0.11")
         self.assertEqual(friction.calls.get("friction_rl"),"0.44")
+
+
+class GripSliderTests(unittest.TestCase):
+    """Two sliders scale the per-wheel grip fields; the compound's own values are kept."""
+
+    def _fake(self):
+        from neptune.features.suspension import SuspensionModule
+        from neptune.memory import offsets as O
+        class Process:
+            def __init__(self):self.mem={}
+            def f32(self,address):return self.mem.get(address)
+            def set_f32(self,address,value):self.mem[address]=value;return True
+        class Vehicle:
+            def __init__(self):self.process=Process();self.car=0
+        class Settings:
+            def get(self,*args,**kwargs):return None
+            def __getattr__(self,name):return lambda *args,**kwargs:None
+        module=SuspensionModule(Settings())
+        vehicle=Vehicle()
+        for i in range(O.Wheels.COUNT):
+            vehicle.process.mem[O.Wheels.BASE+i*O.Wheels.STRIDE+0x0374]=0.985
+            vehicle.process.mem[O.Wheels.BASE+i*O.Wheels.STRIDE+0x0378]=0.985
+        return module,vehicle
+
+    def test_sliders_scale_their_own_field(self):
+        from neptune.memory import offsets as O
+        module,vehicle=self._fake()
+        module.vehicle=vehicle
+        module._capture_grip_stock(vehicle)
+        module._set_grip_lateral(2.0)
+        base=O.Wheels.BASE
+        self.assertAlmostEqual(vehicle.process.mem[base+0x0374],1.97)
+        self.assertAlmostEqual(vehicle.process.mem[base+0x0378],0.985)   # untouched
+        module._set_grip_longitudinal(1.5)
+        self.assertAlmostEqual(vehicle.process.mem[base+0x0378],1.4775)
+
+    def test_reset_restores_stock(self):
+        from neptune.memory import offsets as O
+        module,vehicle=self._fake()
+        module.vehicle=vehicle
+        module._capture_grip_stock(vehicle)
+        module._set_grip_lateral(2.0)
+        module._set_grip_longitudinal(2.0)
+        module._reset_grip()
+        self.assertAlmostEqual(vehicle.process.mem[O.Wheels.BASE+0x0374],0.985)
+        self.assertAlmostEqual(vehicle.process.mem[O.Wheels.BASE+0x0378],0.985)
+
+    def test_reapply_never_compounds(self):
+        from neptune.memory import offsets as O
+        module,vehicle=self._fake()
+        module.vehicle=vehicle
+        module._capture_grip_stock(vehicle)
+        module._set_grip_lateral(2.0)
+        base=O.Wheels.BASE
+        stock=module._grip_stock[0][0]
+        vehicle.process.mem[base+0x0374]=stock*1.4   # physics nudges the live value
+        module._last_grip_reapply=0.0
+        module._reapply_grip_if_rebaked(vehicle)
+        self.assertEqual(module._grip_stock[0][0],stock)              # base unchanged
+        self.assertAlmostEqual(vehicle.process.mem[base+0x0374],stock*2.0)
