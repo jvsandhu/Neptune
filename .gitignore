@@ -22,3 +22,11 @@ release/
 # collaborator has the reverse-engineering context, and must stay OUT of the public
 # release repo. Keep that split in mind before changing this file.
 maybach audio/
+
+# Linux port build artifacts
+neptune_linux/*.exe
+linux/ui-captures/
+
+# Linux port generated reports
+linux/live-validation.json
+linux/ui-audit.json

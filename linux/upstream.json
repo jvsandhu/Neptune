@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/DVS-code/Neptune",
+  "revision": "21ff83cc0f2d06ebc4f7bb569c0978e16052d312",
+  "watched_files": [
+    "neptune/app.py",
+    "neptune/memory/process.py",
+    "neptune/memory/offsets.py",
+    "neptune/core/input.py",
+    "neptune/core/wheels.py",
+    "neptune/core/paths.py",
+    "neptune/core/runtime.py",
+    "neptune/core/updater.py",
+    "neptune/ui/shell.py",
+    "neptune/ui/gamewindow.py",
+    "neptune/ui/theme.py",
+    "neptune/vehicle/vehicle.py",
+    "requirements.txt"
+  ]
+}

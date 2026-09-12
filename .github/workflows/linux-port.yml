@@ -1,0 +1,21 @@
+name: Linux port checks
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y mingw-w64 xvfb libegl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0
+      - run: python -m venv .venv && .venv/bin/python -m pip install -r linux/requirements.lock
+      - run: python linux/build_helper.py
+      - run: .venv/bin/python -m unittest discover -s linux/tests
+      - run: xvfb-run -a .venv/bin/python linux/smoke_ui.py linux/ui-captures
+        env:
+          QT_QPA_PLATFORM: xcb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-ui-captures
+          path: linux/ui-captures
