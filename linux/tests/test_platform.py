@@ -323,3 +323,26 @@ class GripSliderTests(unittest.TestCase):
         module._reapply_grip_if_rebaked(vehicle)
         self.assertEqual(module._grip_stock[0][0],stock)              # base unchanged
         self.assertAlmostEqual(vehicle.process.mem[base+0x0374],stock*2.0)
+
+
+class CarNameLabelTests(unittest.TestCase):
+    def test_update_car_name(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from neptune.ui.shell import Shell
+        class FakeLabel:
+            def __init__(self):self._t=""
+            def text(self):return self._t
+            def setText(self,text):self._t=text
+        class Vehicle:
+            media_name="BMW_E36M3_97"
+            car_config=0x1000
+            class process:
+                @staticmethod
+                def i32(address):return 1234
+        shell=SimpleNamespace(car_name=FakeLabel(),_set_text=Shell._set_text)
+        with patch("neptune.ui.shell.carnames.label",return_value="BMW M3 1997"):
+            Shell._update_car_name(shell,Vehicle())
+        self.assertEqual(shell.car_name.text(),"BMW M3 1997")
+        Shell._update_car_name(shell,None)
+        self.assertEqual(shell.car_name.text(),"No car loaded")
