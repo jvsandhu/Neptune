@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import sys
-from ctypes import byref, c_int, sizeof, windll
+from ctypes import byref, c_int, sizeof
+if sys.platform == "win32":
+    from ctypes import windll
 
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap

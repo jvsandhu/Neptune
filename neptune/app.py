@@ -11,7 +11,10 @@ from qfluentwidgets import Theme, setTheme, setThemeColor
 
 from neptune.core import paths
 from neptune.core.module import ModuleRegistry
-from neptune.core.runtime import Runtime
+if sys.platform == "win32":
+    from neptune.core.runtime import Runtime
+else:
+    from neptune_linux.runtime import Runtime
 from neptune.core.settings import Settings
 from neptune.features.boostgauge import BoostGaugeModule
 from neptune.features.car import CarModule
@@ -23,7 +26,10 @@ from neptune.features.suspension import SuspensionModule
 from neptune.features.tunes import TunesModule
 from neptune.features.turbo import TurboModule
 from neptune.ui import theme as T
-from neptune.ui.shell import Shell
+if sys.platform == "win32":
+    from neptune.ui.shell import Shell
+else:
+    from neptune_linux.shell import Shell
 
 APP_ID = "Neptune.FH6.Tool"
 SPLASH_WIDTH = 420
@@ -45,6 +51,9 @@ def build_registry(settings: Settings) -> ModuleRegistry:
     registry.register(PresetsModule(registry, settings))
     registry.register(SettingsModule(registry, settings))
 
+    if sys.platform != "win32":
+        from neptune_linux.control import wrap_module
+        for module in registry:wrap_module(module)
     return registry
 
 
@@ -68,6 +77,14 @@ def main() -> int:
     setTheme(Theme.DARK)
     setThemeColor(T.ACCENT)
     application.setStyleSheet(T.stylesheet())
+
+    if sys.platform != "win32":
+        # Warm the Proton helper while the user is still looking at the window, so the
+        # first Attach does not pay the container-launch cost. Only runs when FH6 is
+        # already running; see neptune_linux/prewarm.py.
+        from neptune_linux import prewarm
+        prewarm.start()
+        application.aboutToQuit.connect(prewarm.close)
 
     # Shown for as long as Shell takes to build its pages, so the main window is only ever
     # shown fully formed (see Shell.ready).

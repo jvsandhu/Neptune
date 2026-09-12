@@ -15,10 +15,11 @@ sweep through, positions that would fire a hold-style binding while simply drivi
 from __future__ import annotations
 
 import ctypes
+import sys
 import time
 from ctypes import wintypes
 
-winmm = ctypes.WinDLL("winmm")
+winmm = ctypes.WinDLL("winmm") if sys.platform == "win32" else None
 
 MAX_DEVICES = 16
 MAX_BUTTONS = 32
@@ -325,3 +326,6 @@ def poll_any() -> dict | None:
                 if _pov_matches(pov, angle):
                     return make_binding(device, POV_BASE + angle)
     return None
+
+if sys.platform != "win32":
+    from neptune_linux.wheels import devices, poll as _poll

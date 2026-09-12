@@ -278,7 +278,10 @@ class SettingsModule(FeatureModule):
         import subprocess
 
         try:
-            os.startfile(paths.data_dir())
+            # os.startfile is Windows-only; Qt opens the folder on every platform.
+            from PySide6.QtCore import QUrl
+            from PySide6.QtGui import QDesktopServices
+            QDesktopServices.openUrl(QUrl.fromLocalFile(paths.data_dir()))
         except Exception:
             try:
                 subprocess.Popen(["explorer", paths.data_dir()])

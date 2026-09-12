@@ -9,11 +9,12 @@ Three binding kinds, all resolved through `is_down` so feature modules never car
 from __future__ import annotations
 
 import ctypes
+import sys
 from ctypes import wintypes
 
 from neptune.core import wheels
 
-user32 = ctypes.WinDLL("user32")
+user32 = ctypes.WinDLL("user32") if sys.platform == "win32" else None
 
 KEY_TABLE = [
     ("X", 0x58),
@@ -115,6 +116,8 @@ class XINPUT_STATE(ctypes.Structure):
 
 
 def _load_xinput():
+    if sys.platform != "win32":
+        return None
     for name in ("xinput1_4", "xinput1_3", "xinput9_1_0"):
         try:
             library = ctypes.WinDLL(name)
@@ -265,3 +268,9 @@ class EdgeDetector:
 
     def reset(self) -> None:
         self._was_down = False
+
+
+if sys.platform != "win32":
+    from neptune_linux.input import key_down, pad_down, controller_connected
+    def poll_any_pad():
+        return next((make_binding("pad", code) for _,code in PAD_TABLE if pad_down(code)), None)

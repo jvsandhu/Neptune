@@ -21,6 +21,10 @@ def app_dir() -> str:
 
 def data_dir() -> str:
     """Where settings, presets and maps are written."""
+    if sys.platform != "win32":
+        directory = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "neptune-native")
+        os.makedirs(directory, exist_ok=True)
+        return directory
     portable = os.path.join(app_dir(), "data")
     try:
         os.makedirs(portable, exist_ok=True)

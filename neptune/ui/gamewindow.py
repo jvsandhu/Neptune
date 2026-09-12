@@ -295,3 +295,7 @@ class GameWindowTracker:
             return foreground in (self.game_hwnd, self.overlay_hwnd)
         except Exception:
             return False
+
+if not WINDOWS:
+    from neptune_linux.gamewindow import adapt_tracker
+    GameWindowTracker = adapt_tracker(GameWindowTracker, Rect)

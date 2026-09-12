@@ -7,7 +7,11 @@ import ctypes
 import struct
 from ctypes import wintypes
 
-import neptune.memory.k32 as k32
+import sys
+if sys.platform == "win32":
+    import neptune.memory.k32 as k32
+else:
+    k32 = None
 
 _NAME_HINTS = (b"forzahorizon6", b"fh6")
 
@@ -391,3 +395,8 @@ def _module_base_psapi(pid: int, exe_name: str, handle: int = 0) -> int | None:
                 _close(proc)
     except Exception:
         return None
+
+
+if sys.platform != "win32":
+    from neptune_linux.process import adapt_process, game_is_running
+    Process = adapt_process(Process, ProcessError)
