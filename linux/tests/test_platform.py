@@ -310,6 +310,18 @@ class GripSliderTests(unittest.TestCase):
         self.assertAlmostEqual(vehicle.process.mem[O.Wheels.BASE+0x0374],0.985)
         self.assertAlmostEqual(vehicle.process.mem[O.Wheels.BASE+0x0378],0.985)
 
+    def test_both_slider_sets_both_fields(self):
+        from neptune.memory import offsets as O
+        module,vehicle=self._fake()
+        module.vehicle=vehicle
+        module._capture_grip_stock(vehicle)
+        module._set_grip_both(1.5)
+        base=O.Wheels.BASE
+        self.assertAlmostEqual(vehicle.process.mem[base+0x0374],0.985*1.5)
+        self.assertAlmostEqual(vehicle.process.mem[base+0x0378],0.985*1.5)
+        self.assertEqual(module._grip_lateral,1.5)
+        self.assertEqual(module._grip_longitudinal,1.5)
+
     def test_reapply_never_compounds(self):
         from neptune.memory import offsets as O
         module,vehicle=self._fake()

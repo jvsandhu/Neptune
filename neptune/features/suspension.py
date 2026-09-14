@@ -59,6 +59,7 @@ GRIP_REAPPLY_INTERVAL = 1.0
 HINT_GRIP = "Scales tyre grip. 1.00x is stock, and the compound's own behaviour is kept."
 HINT_GRIP_LATERAL = "Cornering (lateral) grip."
 HINT_GRIP_LONGITUDINAL = "Straight-line (longitudinal) grip."
+HINT_GRIP_BOTH = "Sets both grips to the same value."
 
 HYDRAULICS_MANUAL_GROUPS = {
     "front": (0, 1),
@@ -273,6 +274,7 @@ class SuspensionModule(FeatureModule):
             for i in range(4)
         ]
         for key, value in (
+            ("grip_both", self._grip_lateral),
             ("grip_lateral", self._grip_lateral),
             ("grip_longitudinal", self._grip_longitudinal),
             ("front", self._front_percent),
@@ -530,6 +532,18 @@ class SuspensionModule(FeatureModule):
 
     def _set_grip_longitudinal(self, value: float) -> None:
         self._grip_longitudinal = max(GRIP_MIN, min(GRIP_MAX, float(value)))
+        if self.vehicle is not None:
+            self._write_grip(self.vehicle)
+
+    def _set_grip_both(self, value: float) -> None:
+        """Apply one multiplier to both grips at once."""
+        factor = max(GRIP_MIN, min(GRIP_MAX, float(value)))
+        self._grip_lateral = factor
+        self._grip_longitudinal = factor
+        for key in ("grip_lateral", "grip_longitudinal"):
+            slider = self._widgets.get(key)
+            if slider is not None:
+                slider.set_value(factor)
         if self.vehicle is not None:
             self._write_grip(self.vehicle)
 
@@ -1640,7 +1654,7 @@ class SuspensionModule(FeatureModule):
     def _reset_grip(self) -> None:
         self._grip_lateral = 1.0
         self._grip_longitudinal = 1.0
-        for key in ("grip_lateral", "grip_longitudinal"):
+        for key in ("grip_both", "grip_lateral", "grip_longitudinal"):
             slider = self._widgets.get(key)
             if slider is not None:
                 slider.set_value(1.0)
@@ -1651,6 +1665,20 @@ class SuspensionModule(FeatureModule):
         from neptune.ui.widgets.buttons import Button, PrimaryButton
 
         grip_card = page.add_card("Grip", HINT_GRIP)
+        both = SliderRow(
+            "Both",
+            GRIP_MIN,
+            GRIP_MAX,
+            1.0,
+            step=0.05,
+            decimals=2,
+            unit="x",
+            hint=HINT_GRIP_BOTH,
+        )
+        both.changed.connect(self._set_grip_both)
+        self._widgets["grip_both"] = both
+        grip_card.add(both)
+
         lateral = SliderRow(
             "Cornering",
             GRIP_MIN,
