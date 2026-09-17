@@ -15,6 +15,9 @@ jobs:
       - run: xvfb-run -a .venv/bin/python linux/smoke_ui.py linux/ui-captures
         env:
           QT_QPA_PLATFORM: xcb
+      - run: xvfb-run -a .venv/bin/python linux/test_overlay.py
+        env:
+          QT_QPA_PLATFORM: xcb
       - uses: actions/upload-artifact@v4
         with:
           name: native-ui-captures

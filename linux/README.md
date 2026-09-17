@@ -38,7 +38,7 @@ The Windows executable updater is not a Linux-port update mechanism. Use the sou
 - Protected writes and thread suspension explicitly fail; ordinary engine/curve data access does not use these APIs in the current upstream revision.
 - Car image extraction may need `NEPTUNE_GAME_EXE` set to the actual Linux path of the game executable.
 - Upstream now differs from the six supplied screenshots (notably navigation and absence of World). The Linux style retains their compact purple sidebar treatment while sharing current upstream pages and controls.
-- Upstream resets torque settings on a different car. The requested global multiplier that follows car switches is still pending, not silently claimed implemented.
+- Engine torque and turbo multipliers are kept across a car change: the port re-applies the relative multiplier to the new car's own stock curve instead of resetting it (upstream resets).
 
 ## Licensing
 
