@@ -1,4 +1,4 @@
-import struct,sys,unittest
+import struct,sys,threading,unittest
 from pathlib import Path
 from types import SimpleNamespace
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
@@ -359,3 +359,38 @@ class CarNameLabelTests(unittest.TestCase):
         self.assertEqual(shell.car_name.text(),"BMW M3 1997")
         Shell._update_car_name(shell,None)
         self.assertEqual(shell.car_name.text(),"No car loaded")
+
+
+class DisplayCacheTests(unittest.TestCase):
+    """GUI-thread reads must never blank for a frame when the cache is cold or after a write.
+
+    Regression for the torque graph blinking: `write()` cleared the whole display cache and a
+    miss returned None, so every re-apply of a tune dropped the live curve for a frame.
+    """
+
+    def _process(self):
+        from neptune_linux.process import adapt_process
+        bridge=Bridge()
+        bridge.write(0x100,struct.pack('<f',1.25))
+        instance=adapt_process(Process,ProcessError)(1,1,0x140000000,'forzahorizon6.exe')
+        instance.bridge=bridge
+        instance._alive=True
+        instance._cache={}
+        instance._requests={}
+        instance._cache_lock=threading.RLock()
+        instance._cache_stop=threading.Event()
+        self.addCleanup(instance._cache_stop.set)
+        return instance
+
+    def test_cold_read_returns_data_not_none(self):
+        p=self._process()
+        self.assertIsNotNone(p.f32(0x100))
+        self.assertAlmostEqual(p.f32(0x100),1.25,places=6)
+
+    def test_write_does_not_blank_following_reads(self):
+        p=self._process()
+        self.assertAlmostEqual(p.f32(0x100),1.25,places=6)
+        self.assertTrue(p.set_f32(0x100,2.5))
+        self.assertIsNotNone(p.f32(0x100))
+        self.assertAlmostEqual(p.f32(0x100),2.5,places=6)
+

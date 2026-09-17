@@ -123,7 +123,17 @@ def adapt_process(base_class, error_class):
             if hasattr(self,'_cache') and not direct_read.get() and threading.current_thread() is threading.main_thread():
                 with self._cache_lock:
                     key=(address,size);self._requests[key]=time.monotonic()
-                    return self._cache.get(key)
+                    cached=self._cache.get(key)
+                if cached is not None:
+                    return cached
+                # Cold key: first read of a page, or a size the cache loop has not served yet.
+                # Fetch it synchronously rather than returning None, which blanked graphs and
+                # stats for a frame. This runs once per key, not on every refresh, so it does
+                # not put an IPC round-trip on the steady-state display path.
+                try:data=self.bridge.read(address,size)
+                except BridgeError:return None
+                with self._cache_lock:self._cache[key]=data
+                return data
             try:return self.bridge.read(address,size)
             except BridgeError:return None
 
@@ -131,8 +141,21 @@ def adapt_process(base_class, error_class):
             if not address or not data:return False
             try:
                 self.bridge.write(address,data)
+                # Reflect the write into the display cache instead of clearing it. Clearing made
+                # every cached read return None for a frame, which blanked the torque graph each
+                # time a tune re-applied. Overlapping entries are patched in place; anything the
+                # game derives from the write is refreshed by `_cache_loop` within ~50 ms.
                 if hasattr(self,'_cache'):
-                    with self._cache_lock:self._cache.clear()
+                    end=address+len(data)
+                    with self._cache_lock:
+                        for key,cached in self._cache.items():
+                            if cached is None:continue
+                            start,size=key
+                            if not (start < end and address < start+size):continue
+                            lower=max(address,start);upper=min(end,start+size)
+                            patched=bytearray(cached)
+                            patched[lower-start:upper-start]=data[lower-address:upper-address]
+                            self._cache[key]=bytes(patched)
                 return True
             except Exception as error:
                 raise error_class('Game write failed: '+str(error)) from error
