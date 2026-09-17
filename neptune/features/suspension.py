@@ -12,7 +12,7 @@ from neptune.core.module import FeatureModule
 from neptune.memory import offsets as O
 from neptune.ui import theme as T
 from neptune.ui.widgets.card import Banner, FieldRow, StatStrip, ToggleRow
-from neptune.ui.widgets.controls import BindButton, Segmented, SectionHeading
+from neptune.ui.widgets.controls import BindButton, SectionHeading, Segmented
 from neptune.ui.widgets.sliderrow import SliderRow
 from neptune.ui.widgets.transitioncurve import (
     DEFAULT_CURVE,
@@ -117,6 +117,10 @@ HINT_TRACK_MIRROR = "One value per axle instead of four — both wheels move tog
 HINT_TOE = "Static toe, per wheel — each corner is independent."
 HINT_TOE_MIRROR = "One value per axle instead of four — the right wheel mirrors the left."
 HINT_DROP = "How far air ride drops the car."
+HINT_AIRRIDE_ENABLED = (
+    "Enables the air-ride drop/lift action and its key binding. Turning it off returns the car "
+    "to the configured ride height."
+)
 HINT_AIR_CAMBER = (
     "Moves camber from the values above to the lowered values whenever air ride drops."
 )
@@ -193,6 +197,9 @@ class SuspensionModule(FeatureModule):
         self._floor_percent = DEFAULT_FLOOR_PERCENT
         self._ramp_seconds = DEFAULT_RAMP_SECONDS
         self._sequence = "together"
+        # Keep the existing behaviour for older presets while allowing the
+        # user to disarm the air-ride action without losing its settings.
+        self._airride_enabled = True
         self._lowered = False
 
         self._grip_lateral = 1.0
@@ -303,6 +310,7 @@ class SuspensionModule(FeatureModule):
             if slider is not None and value is not None:
                 slider.set_value(value)
         for key, state in (
+            ("airride_enabled", self._airride_enabled),
             ("bounce", self._bounce),
             ("bounce_audio", self._bounce_audio),
             ("hydraulics", self._hydraulics),
@@ -346,6 +354,9 @@ class SuspensionModule(FeatureModule):
             card = self._widgets.get(card_key)
             if card is not None:
                 card.setEnabled(not self._air_camber)
+        trigger = self._widgets.get("airride_trigger")
+        if trigger is not None:
+            trigger.setEnabled(self._airride_enabled)
 
     def binding(self) -> dict | None:
         return self.settings.binding("suspension.airride")
@@ -727,8 +738,12 @@ class SuspensionModule(FeatureModule):
             self._capture_toe_stock(vehicle)
         if self._rear_solid_axle is None or self._rigid_body_tires is None:
             self._check_rear_axle(vehicle)
-        if self._edge.pressed(self.binding()):
+        if self._airride_enabled and self._edge.pressed(self.binding()):
             self.toggle()
+        elif not self._airride_enabled:
+            # Do not let a key held while the feature is disabled fire as soon
+            # as the user enables it again.
+            self._edge.reset()
 
         if self._hydraulics:
             bindings = self.settings.get("bindings", {}) or {}
@@ -1143,7 +1158,39 @@ class SuspensionModule(FeatureModule):
         self._write_toe()
         self._toe = [None, None, None, None]
 
+    def set_airride_enabled(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if enabled == self._airride_enabled:
+            return
+
+        self._airride_enabled = enabled
+        self._edge.reset()
+
+        if not enabled and self._lowered and not self._bounce and not self._hydraulics:
+            vehicle = self.vehicle
+            start_camber = vehicle.camber if self._air_camber and vehicle is not None else None
+            self._cancel_ramp()
+            self._cancel_camber_ramp()
+            self._lowered = False
+            self._air_camber_preview = False
+            if self.stock and vehicle is not None:
+                start = vehicle.ride_height or self._target(True)
+                self._start_ramp(
+                    start,
+                    self._target(False),
+                    self._ramp_seconds,
+                    reverse=True,
+                )
+                if self._air_camber and start_camber:
+                    camber_target = self._configured_camber()
+                    if all(value is not None for value in camber_target):
+                        self._start_camber_ramp(start_camber, camber_target, self._ramp_seconds)
+
+        self._controls_dirty = True
+
     def toggle(self) -> None:
+        if not self._airride_enabled:
+            return
         if not self.stock or self.vehicle is None:
             return
         if self._bounce or self._hydraulics:
@@ -1228,7 +1275,7 @@ class SuspensionModule(FeatureModule):
                 if self.vehicle is None or not self.stock:
                     return
                 low, high = sorted((self._bounce_low, self._bounce_high))
-                
+
                 phase += 2.0 * math.pi * self._bounce_speed * interval
                 if phase > 2.0 * math.pi:
                     phase -= 2.0 * math.pi
@@ -1954,8 +2001,18 @@ class SuspensionModule(FeatureModule):
 
         air_card = page.add_card("Air ride", "Drops the car on a key press.")
 
+        airride_enabled = ToggleRow(
+            "Enable air ride",
+            self._airride_enabled,
+            hint=HINT_AIRRIDE_ENABLED,
+        )
+        airride_enabled.toggle.toggled_value.connect(self.set_airride_enabled)
+        self._widgets["airride_enabled"] = airride_enabled
+        air_card.add(airride_enabled)
+
         toggle_button = PrimaryButton("Drop or lift now")
         toggle_button.clicked.connect(self.toggle)
+        self._widgets["airride_trigger"] = toggle_button
         air_card.add(toggle_button)
 
         bind_button = BindButton(self.binding(), settings=self.settings, key="suspension.airride")
@@ -2352,6 +2409,7 @@ class SuspensionModule(FeatureModule):
             "floor": self._floor_percent,
             "ramp_seconds": self._ramp_seconds,
             "sequence": self._sequence,
+            "airride_enabled": self._airride_enabled,
             "bounce_low": self._bounce_low,
             "bounce_high": self._bounce_high,
             "bounce_speed": self._bounce_speed,
@@ -2413,6 +2471,8 @@ class SuspensionModule(FeatureModule):
         self._drop_percent = _percent("drop", DROP_PERCENT_DEFAULT, 0.0, LOWER_PERCENT_MAX)
         self._floor_percent = _percent("floor", DEFAULT_FLOOR_PERCENT, 0.0, 100.0)
         self._ramp_seconds = _number("ramp_seconds", DEFAULT_RAMP_SECONDS, 0.3, 6.0)
+        airride_enabled = bool(data.get("airride_enabled", True))
+        self._edge.reset()
 
         sequence = data.get("sequence")
         if sequence in SEQUENCE_LABELS:
@@ -2461,5 +2521,9 @@ class SuspensionModule(FeatureModule):
         self._toe_mirror = bool(data.get("toe_mirror", True))
         if any(value is not None for value in self._toe):
             self._write_toe()
+
+        # Last, once heights and camber are loaded: disabling air ride while the car sits
+        # dropped has to lift it, or it stays down with the drop control locked.
+        self.set_airride_enabled(airride_enabled)
 
         self._controls_dirty = True

@@ -199,6 +199,7 @@ class MultiplierCarryTests(unittest.TestCase):
         class Vehicle:
             rev_ceiling=7500.0
             redline=7300.0
+            idle_rpm=900.0
             def curve(self):return [1.0,2.0,3.0]
         module=EngineModule(None)
         module._torque_multiplier=1.2

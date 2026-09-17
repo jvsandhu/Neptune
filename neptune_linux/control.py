@@ -34,7 +34,13 @@ def wrap_module(module):
         def wrap(method, name):
             @wraps(method)
             def call(*args, **kwargs):
-                if name == '_ensure_overlay' and not on_gui_thread():
+                # Any module-specific overlay builder (`_ensure_overlay`,
+                # `_ensure_dyno_overlay`, ...) must run on the GUI thread.
+                if (
+                    name.startswith('_ensure_')
+                    and name.endswith('overlay')
+                    and not on_gui_thread()
+                ):
                     # Overlays build QWidgets and start QTimers; doing that off the GUI
                     # thread corrupts Qt's thread-local font engines and can SIGSEGV later.
                     post_to_gui(lambda: method(*args, **kwargs))
