@@ -13,6 +13,16 @@ from .dispatch import on_gui_thread, post_to_gui
 
 direct_read = ContextVar('neptune_direct_read', default=False)
 
+# Module methods that may construct a Qt overlay. This is a naming convention, not a guarantee;
+# the port's contract test asserts that every method which actually builds a widget matches it,
+# so a future builder under a different name fails in CI instead of SIGSEGV-ing at runtime.
+OVERLAY_BUILDER_PREFIXES = ('_ensure_', '_build_', '_create_')
+
+
+def builds_overlay(name):
+    """True when a module method must be marshalled onto the GUI thread."""
+    return name.startswith(OVERLAY_BUILDER_PREFIXES) and 'overlay' in name
+
 
 @contextmanager
 def live_reads():
@@ -34,13 +44,7 @@ def wrap_module(module):
         def wrap(method, name):
             @wraps(method)
             def call(*args, **kwargs):
-                # Any module-specific overlay builder (`_ensure_overlay`,
-                # `_ensure_dyno_overlay`, ...) must run on the GUI thread.
-                if (
-                    name.startswith('_ensure_')
-                    and name.endswith('overlay')
-                    and not on_gui_thread()
-                ):
+                if builds_overlay(name) and not on_gui_thread():
                     # Overlays build QWidgets and start QTimers; doing that off the GUI
                     # thread corrupts Qt's thread-local font engines and can SIGSEGV later.
                     post_to_gui(lambda: method(*args, **kwargs))
