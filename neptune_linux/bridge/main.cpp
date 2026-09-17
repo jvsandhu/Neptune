@@ -16,6 +16,8 @@
 using Bytes = std::vector<unsigned char>;
 using Address = std::uint64_t;
 static constexpr size_t MAX_FRAME = 20 * 1024 * 1024;
+// Bumped when the wire protocol changes; the client refuses a helper it cannot speak to.
+static constexpr int PROTOCOL = 1;
 static std::string utf8(const wchar_t* input) {
     int n = WideCharToMultiByte(CP_UTF8, 0, input, -1, nullptr, 0, nullptr, nullptr);
     if (n < 1) return "";
@@ -66,13 +68,22 @@ public:
     }
     void write(Address address,const Bytes& bytes) {
         check(); if(bytes.empty()) throw std::runtime_error("Empty write");
-        DWORD old=0;
-        if(!VirtualProtectEx(process,reinterpret_cast<void*>(address),bytes.size(),PAGE_EXECUTE_READWRITE,&old)) fail("VirtualProtectEx");
-        SIZE_T written=0; BOOL ok=WriteProcessMemory(process,reinterpret_cast<void*>(address),bytes.data(),bytes.size(),&written);
-        DWORD saved=GetLastError(), ignored=0;
+        // Data writes land on already-writable pages, so try the plain write first. Only
+        // escalate to PAGE_EXECUTE_READWRITE when the page is not writable (code/const), and
+        // put the old protection back. Forcing RWX on every write made game data executable,
+        // paid two extra syscalls each time, and could leave an RWX page behind on a crash.
+        SIZE_T written=0;
+        if(WriteProcessMemory(process,reinterpret_cast<void*>(address),bytes.data(),bytes.size(),&written) && written==bytes.size())
+            return;
+        DWORD saved=GetLastError(), old=0;
+        if(!VirtualProtectEx(process,reinterpret_cast<void*>(address),bytes.size(),PAGE_EXECUTE_READWRITE,&old)) {
+            SetLastError(saved); fail("WriteProcessMemory");
+        }
+        BOOL ok=WriteProcessMemory(process,reinterpret_cast<void*>(address),bytes.data(),bytes.size(),&written);
+        DWORD writeError=GetLastError(), ignored=0;
         BOOL restored=VirtualProtectEx(process,reinterpret_cast<void*>(address),bytes.size(),old,&ignored);
         FlushInstructionCache(process,reinterpret_cast<void*>(address),bytes.size());
-        if(!ok || written!=bytes.size()) { SetLastError(saved); fail("WriteProcessMemory"); }
+        if(!ok || written!=bytes.size()) { SetLastError(writeError); fail("WriteProcessMemory"); }
         if(!restored) fail("Restore page protection");
     }
     void patch(Address address,const Bytes& expected,const Bytes& replacement) {
@@ -267,16 +278,16 @@ static bool frame(SOCKET socket,std::string& data,bool sending) {
 int main(int argc,char** argv) {
     if(argc==2 && std::string(argv[1])=="--self-test") {
         if(hex(unhex("00ff1234"))!="00ff1234")return 1;
-        std::cout<<"Luna C++ bridge; protocol 1; no CLR\n";return 0;
+        std::cout<<"Neptune C++ bridge; protocol "<<PROTOCOL<<"; no CLR\n";return 0;
     }
-    if(argc!=3) {std::cerr<<"Usage: luna-bridge.exe PORT TOKEN\n";return 2;}
+    if(argc!=3) {std::cerr<<"Usage: neptune-bridge.exe PORT TOKEN\n";return 2;}
     try {
         auto port=number(argv[1],10);if(port<1024 || port>65535 || std::strlen(argv[2])!=64)return 2;
         WSADATA data{};if(WSAStartup(MAKEWORD(2,2),&data))return 3;
         SOCKET socket=::socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);if(socket==INVALID_SOCKET)return 3;
         sockaddr_in address{};address.sin_family=AF_INET;address.sin_port=htons(static_cast<u_short>(port));address.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
         if(connect(socket,reinterpret_cast<sockaddr*>(&address),sizeof(address))==SOCKET_ERROR){closesocket(socket);WSACleanup();return 4;}
-        std::string hello=std::string("LUNA1 ")+argv[2];if(!frame(socket,hello,true))return 4;
+        std::string hello=std::string("LUNA1 ")+std::to_string(PROTOCOL)+" "+argv[2];if(!frame(socket,hello,true))return 4;
         { Game game;std::string request,lastOperation;
           std::cerr<<"Bridge connected; helper PID="<<GetCurrentProcessId()<<"\n";
           while(frame(socket,request,false)) {

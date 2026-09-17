@@ -11,9 +11,29 @@ import threading
 import time
 
 MAX_FRAME = 20 * 1024 * 1024
+# Bumped only with an incompatible wire change; a helper that speaks a newer protocol is
+# rejected at connect instead of failing somewhere in the middle of a tune.
+PROTOCOL = 1
 
 class BridgeError(RuntimeError):
     pass
+
+
+def parse_hello(hello):
+    """(token, protocol) from a helper greeting, or (None, None) when it is not ours.
+
+    A greeting with no protocol field comes from a helper built before versioning; accept it
+    as protocol 1 rather than refusing to connect to a binary the user has not rebuilt yet.
+    """
+    parts = hello.split(' ')
+    if len(parts) == 2 and parts[0] == 'LUNA1':
+        return parts[1], 1
+    if len(parts) == 3 and parts[0] == 'LUNA1':
+        try:
+            return parts[2], int(parts[1])
+        except ValueError:
+            return None, None
+    return None, None
 
 
 def receive_exact(sock, size):
@@ -51,7 +71,7 @@ class Bridge:
     @classmethod
     def start(cls, helper, appid='2483190', timeout=45):
         if os.geteuid() == 0:
-            raise BridgeError('Run Luna as your regular Steam user, without sudo.')
+            raise BridgeError('Run Neptune as your regular Steam user, without sudo.')
         executable = shutil.which('protontricks-launch')
         if not executable:
             raise BridgeError('Install protontricks: sudo pacman -Syu protontricks')
@@ -84,12 +104,19 @@ class Bridge:
                 connection.settimeout(min(2, max(0.01, deadline-time.monotonic())))
                 try:
                     hello = receive_frame(connection)
-                    if not hmac.compare_digest(hello, 'LUNA1 ' + token):
-                        connection.close()
-                        continue
                 except (OSError, BridgeError, UnicodeError):
                     connection.close()
                     continue
+                seen_token, protocol = parse_hello(hello)
+                if seen_token is None or not hmac.compare_digest(seen_token, token):
+                    connection.close()
+                    continue
+                if protocol > PROTOCOL:
+                    connection.close()
+                    raise BridgeError(
+                        f'The Proton helper speaks protocol {protocol}; this build understands '
+                        f'{PROTOCOL}. Rebuild it with: python3 linux/build_helper.py'
+                    )
                 connection.settimeout(30)
                 return cls(connection, process, log)
             raise BridgeError(f'Proton helper did not connect. Check {log_dir / "proton.log"}')
