@@ -1,4 +1,4 @@
-import struct,sys,threading,unittest
+import ast,struct,sys,threading,time,unittest
 from pathlib import Path
 from types import SimpleNamespace
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
@@ -393,4 +393,284 @@ class DisplayCacheTests(unittest.TestCase):
         self.assertTrue(p.set_f32(0x100,2.5))
         self.assertIsNotNone(p.f32(0x100))
         self.assertAlmostEqual(p.f32(0x100),2.5,places=6)
+
+    def test_cache_loop_survives_an_unexpected_bridge_error(self):
+        # A malformed frame raises ValueError (not BridgeError). The loop must keep running and
+        # report the process dead, rather than dying and leaving the display stale-but-"alive".
+        p=self._process()
+        thread=threading.Thread(target=p._cache_loop,daemon=True)
+        thread.start()
+        self.addCleanup(p._cache_stop.set)
+        time.sleep(0.08)
+        self.assertTrue(thread.is_alive())
+        p.bridge.call=lambda *a:(_ for _ in ()).throw(ValueError('malformed frame'))
+        time.sleep(0.12)
+        self.assertTrue(thread.is_alive(),'the cache loop must not die on an unexpected error')
+        self.assertFalse(p._alive,'an unexpected bridge failure must report the process dead')
+
+
+class InputDropoutTests(unittest.TestCase):
+    """A dropped input poll must not read as 'everything released'."""
+
+    X = 0x58
+
+    def setUp(self):
+        from neptune_linux import input as linux_input
+        self.input=linux_input
+        self._saved=(linux_input._owner,linux_input._keys,linux_input._pads,linux_input._last)
+        linux_input._owner=None;linux_input._keys=bytes(32)
+        linux_input._pads=[];linux_input._last=0.0
+        process.active_process=None
+
+    def tearDown(self):
+        self.input._owner,self.input._keys,self.input._pads,self.input._last=self._saved
+        process.active_process=None
+
+    def _owner(self,bridge):
+        owner=SimpleNamespace(bridge=bridge)
+        return owner
+
+    def test_failed_poll_keeps_the_last_sample(self):
+        keys=bytearray(32);keys[self.X//8]|=1<<(self.X%8)
+        class Bridge:
+            fail=False
+            reply='1 '+keys.hex()+' 1,4096,0,0 0,0,0,0 0,0,0,0 0,0,0,0'
+            def call(self,op):
+                if self.fail:raise RuntimeError('helper gone')
+                return self.reply
+        bridge=Bridge()
+        process.active_process=self._owner(bridge)
+        self.assertTrue(self.input.key_down(self.X))
+        bridge.fail=True
+        self.input._last=0.0  # defeat the throttle without changing the owner
+        self.assertTrue(self.input.key_down(self.X),'a failed poll must keep the last good sample')
+
+    def test_owner_change_clears_the_previous_session(self):
+        keys=bytearray(32);keys[self.X//8]|=1<<(self.X%8)
+        class Bridge:
+            reply='1 '+keys.hex()+' 0,0,0,0 0,0,0,0 0,0,0,0 0,0,0,0'
+            def call(self,op):return self.reply
+        process.active_process=self._owner(Bridge())
+        self.assertTrue(self.input.key_down(self.X))
+        process.active_process=None
+        self.assertFalse(self.input.key_down(self.X),'a key held at disconnect must not stay down')
+
+
+class PortContractTests(unittest.TestCase):
+    """Fail in CI when an upstream interface moves out from under the port.
+
+    The port attaches to upstream by replacing symbols at import time and by subclassing.
+    If upstream renames or removes one of those symbols the seam silently stops applying,
+    so these checks turn that into a test failure instead of a runtime surprise.
+    """
+
+    REQUIRED_PROCESS_METHODS=(
+        'attach','close','alive','executable_path','read','write','write_protected',
+        'writable_regions','thread_ids','threads_suspended','write_suspended',
+        'f32','i32','u32','pointer','f32_array','set_f32','set_i32','set_f32_array','chain',
+    )
+
+    def test_import_time_seams_still_apply(self):
+        import neptune.core.input as core_input
+        import neptune.core.wheels as core_wheels
+        import neptune.memory.process as memory_process
+        import neptune.ui.gamewindow as ui_gamewindow
+        from neptune_linux import input as linux_input
+        from neptune_linux import process as linux_process
+        from neptune_linux import wheels as linux_wheels
+        self.assertEqual(memory_process.Process.__module__,'neptune_linux.process',
+                         'the memory.process Process seam stopped applying')
+        self.assertIs(memory_process.game_is_running,linux_process.game_is_running,
+                      'the memory.process game_is_running seam stopped applying')
+        self.assertIs(core_input.key_down,linux_input.key_down,
+                      'the core.input key_down seam stopped applying')
+        self.assertIs(core_input.pad_down,linux_input.pad_down,
+                      'the core.input pad_down seam stopped applying')
+        self.assertIs(core_input.controller_connected,linux_input.controller_connected,
+                      'the core.input controller_connected seam stopped applying')
+        self.assertIs(core_wheels.devices,linux_wheels.devices,
+                      'the core.wheels devices seam stopped applying')
+        self.assertIs(core_wheels._poll,linux_wheels.poll,
+                      'the core.wheels poll seam stopped applying')
+        self.assertEqual(ui_gamewindow.GameWindowTracker.__module__,'neptune_linux.gamewindow',
+                         'the ui.gamewindow tracker seam stopped applying')
+
+    def test_lifecycle_subclasses_still_match_upstream(self):
+        from neptune.core.runtime import Runtime as UpstreamRuntime
+        from neptune.ui.shell import Shell as UpstreamShell
+        from neptune_linux.runtime import Runtime as LinuxRuntime
+        from neptune_linux.shell import Shell as LinuxShell
+        self.assertTrue(issubclass(LinuxRuntime,UpstreamRuntime))
+        self.assertTrue(issubclass(LinuxShell,UpstreamShell))
+
+    def test_process_surface_still_covers_what_features_use(self):
+        from neptune.memory.process import Process
+        for name in self.REQUIRED_PROCESS_METHODS:
+            self.assertTrue(hasattr(Process,name),
+                            f'Process.{name} is gone; the Linux adapter needs updating')
+
+    def test_every_overlay_builder_is_marshalled_to_the_gui_thread(self):
+        from neptune_linux.control import builds_overlay
+        self.assertTrue(builds_overlay('_ensure_overlay'))
+        self.assertTrue(builds_overlay('_ensure_dyno_overlay'))
+        self.assertTrue(builds_overlay('_build_gauge_overlay'))
+        self.assertFalse(builds_overlay('tick'))
+        self.assertFalse(builds_overlay('_set_overlay_mode'))
+        features=Path(__file__).resolve().parents[2]/'neptune'/'features'
+        gui_only={'tick','tick_process','refresh','build_page'}
+        offenders=[]
+        for path in sorted(features.glob('*.py')):
+            tree=ast.parse(path.read_text(),filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node,ast.ClassDef):continue
+                for item in node.body:
+                    if not isinstance(item,(ast.FunctionDef,ast.AsyncFunctionDef)):continue
+                    if item.name in gui_only or builds_overlay(item.name):continue
+                    if self._constructs_overlay(item):
+                        offenders.append(f'{path.name}:{node.name}.{item.name}')
+        self.assertEqual(offenders,[],'overlay builders not marshalled to the GUI thread: '+', '.join(offenders))
+
+    @staticmethod
+    def _constructs_overlay(function):
+        for node in ast.walk(function):
+            if not isinstance(node,ast.Call):continue
+            target=node.func
+            name=target.id if isinstance(target,ast.Name) else getattr(target,'attr','')
+            if name.endswith('Overlay'):
+                return True
+        return False
+
+
+class AsyncTeardownTests(unittest.TestCase):
+    """Restore and close must not run helper round-trips on the GUI thread.
+
+    Every write is a synchronous helper call, so upstream's on-thread restore/detach froze the
+    window (the desktop reported "not responding") during Restore everything and on close.
+    """
+
+    def _patch_timer(self):
+        """Replace QTimer.singleShot with a recorder so the tests need no event loop."""
+        from unittest.mock import patch
+        import neptune_linux.shell as linux_shell
+        calls=[]
+        class FakeTimer:
+            @staticmethod
+            def singleShot(ms,callback):calls.append((ms,callback))
+        patcher=patch.object(linux_shell,'QTimer',FakeTimer)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return calls
+
+    def test_restore_all_dispatches_restore_off_the_caller_thread(self):
+        self._patch_timer()
+        from neptune_linux.shell import Shell
+        main=threading.current_thread().name
+        seen=[];done=threading.Event()
+        class Registry:
+            def dispatch(self,event,*a):
+                seen.append((event,threading.current_thread().name))
+                if event=='restore':done.set()
+        fake=SimpleNamespace(registry=Registry(),_restoring=False,_sync_all_controls=lambda:None)
+        Shell._restore_all(fake)
+        self.assertIn(('reset_controls',main),seen,'reset_controls must stay on the GUI thread')
+        self.assertTrue(done.wait(2.0),'the restore dispatch never ran')
+        self.assertIn(('restore','neptune-restore'),seen,'restore must run off the GUI thread')
+
+    def test_begin_shutdown_runs_the_teardown_off_the_caller_thread(self):
+        self._patch_timer()
+        from neptune_linux.shell import Shell
+        main=threading.current_thread().name
+        seen=[];done=threading.Event()
+        class Registry:
+            def dispatch(self,event,*a):
+                seen.append((event,threading.current_thread().name))
+                if event=='restore':done.set()
+        class Process:
+            def close(self):seen.append(('process.close',threading.current_thread().name))
+        class Runtime:
+            def __init__(self):self.process=Process();self.vehicle=object()
+            def stop(self):seen.append(('stop',threading.current_thread().name));return True
+        fake=SimpleNamespace(registry=Registry(),runtime=Runtime(),_close_ready=False,close=lambda:None)
+        Shell._begin_shutdown(fake)
+        self.assertIn(('reset_controls',main),seen)
+        self.assertTrue(done.wait(2.0))
+        self.assertIn(('stop','neptune-shutdown'),seen)
+        self.assertIn(('process.close','neptune-shutdown'),seen)
+
+    def test_close_hides_and_returns_without_blocking(self):
+        self._patch_timer()
+        from neptune_linux.shell import Shell
+        main=threading.current_thread().name
+        seen=[]
+        class Event:
+            def __init__(self):self.accepted=False;self.ignored=False
+            def accept(self):self.accepted=True
+            def ignore(self):self.ignored=True
+        fake=SimpleNamespace(_close_ready=False,_closing=False,_attaching=False,
+                             _timer=SimpleNamespace(stop=lambda:None),
+                             hide=lambda:seen.append(('hide',main)),
+                             _begin_shutdown=lambda:seen.append(('begin_shutdown',main)),
+                             close=lambda:None)
+        event=Event()
+        started=time.monotonic()
+        Shell.closeEvent(fake,event)
+        self.assertLess(time.monotonic()-started,0.5,'closeEvent must not block the GUI thread')
+        self.assertTrue(event.ignored)
+        self.assertFalse(event.accepted)
+        self.assertIn(('hide',main),seen)
+        self.assertIn(('begin_shutdown',main),seen)
+
+    def test_close_while_attaching_is_deferred_not_dropped(self):
+        calls=self._patch_timer()
+        from neptune_linux.shell import Shell
+        class Event:
+            def __init__(self):self.accepted=False;self.ignored=False
+            def accept(self):self.accepted=True
+            def ignore(self):self.ignored=True
+        fake=SimpleNamespace(_close_ready=False,_closing=False,_attaching=True,
+                             _timer=SimpleNamespace(stop=lambda:None),hide=lambda:None,
+                             _begin_shutdown=lambda:None,close=lambda:None)
+        event=Event()
+        Shell.closeEvent(fake,event)
+        self.assertTrue(event.ignored)
+        self.assertTrue(any(ms==1000 for ms,_ in calls),'the close must be retried, not dropped')
+
+
+class GameWindowChoiceTests(unittest.TestCase):
+    """The game window is matched by PID first; the title is only a fallback."""
+
+    def test_pid_match_wins(self):
+        from neptune_linux.gamewindow import choose_game_window
+        rows=[(1,'Forza Horizon 6',None,100),(2,'Something else',1234,50),(3,'Forza Horizon 6',None,900)]
+        self.assertEqual(choose_game_window(rows,1234),2)
+
+    def test_largest_titled_window_when_there_is_no_pid(self):
+        from neptune_linux.gamewindow import choose_game_window
+        rows=[(1,'Forza Horizon 6',None,100),(2,'Forza Horizon 6',None,900),(3,'Firefox',None,5000)]
+        self.assertEqual(choose_game_window(rows,None),2)
+
+    def test_no_match_returns_none(self):
+        from neptune_linux.gamewindow import choose_game_window
+        self.assertIsNone(choose_game_window([(1,'Firefox',None,5000)],None))
+
+
+class HelloProtocolTests(unittest.TestCase):
+    """The helper greeting carries a protocol number so a stale binary fails at connect."""
+
+    def test_current_greeting_carries_the_protocol(self):
+        from neptune_linux.transport import PROTOCOL,parse_hello
+        self.assertEqual(parse_hello(f'LUNA1 {PROTOCOL} abc123'),('abc123',PROTOCOL))
+
+    def test_pre_version_greeting_is_accepted_as_protocol_1(self):
+        from neptune_linux.transport import parse_hello
+        self.assertEqual(parse_hello('LUNA1 abc123'),('abc123',1))
+
+    def test_foreign_or_malformed_greeting_is_ignored(self):
+        from neptune_linux.transport import parse_hello
+        self.assertEqual(parse_hello('HELLO abc123'),(None,None))
+        self.assertEqual(parse_hello('LUNA1'),(None,None))
+        self.assertEqual(parse_hello('LUNA1 xyz abc'),(None,None))
+
+
+
 
