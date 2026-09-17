@@ -101,6 +101,12 @@ class Bridge:
                     if process.poll() is not None and process.returncode != 0:
                         raise BridgeError(f'Proton helper failed. See {log_dir / "proton.log"}')
                     continue
+                try:
+                    # Small request frames must not wait on Nagle/delayed-ACK: that alone cost
+                    # ~40 ms per call, which made restores and aborts feel frozen.
+                    connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                except OSError:
+                    pass
                 connection.settimeout(min(2, max(0.01, deadline-time.monotonic())))
                 try:
                     hello = receive_frame(connection)

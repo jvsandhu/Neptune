@@ -270,9 +270,18 @@ static bool transfer(SOCKET socket,char* data,size_t length,bool sending) {
 }
 static bool frame(SOCKET socket,std::string& data,bool sending) {
     uint32_t length=static_cast<uint32_t>(data.size());
+    if(sending) {
+        // Header and payload in ONE send. Two small sends let Nagle wait for the delayed ACK,
+        // which cost ~40 ms on every round-trip and made the whole tool feel frozen.
+        std::string buffer;
+        buffer.reserve(4+data.size());
+        buffer.append(reinterpret_cast<const char*>(&length),4);
+        buffer.append(data);
+        return transfer(socket,buffer.data(),buffer.size(),true);
+    }
     if(!transfer(socket,reinterpret_cast<char*>(&length),4,sending))return false;
     if(length>MAX_FRAME)return false;
-    if(!sending)data.resize(length);
+    data.resize(length);
     return transfer(socket,data.data(),length,sending);
 }
 int main(int argc,char** argv) {
@@ -287,6 +296,7 @@ int main(int argc,char** argv) {
         SOCKET socket=::socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);if(socket==INVALID_SOCKET)return 3;
         sockaddr_in address{};address.sin_family=AF_INET;address.sin_port=htons(static_cast<u_short>(port));address.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
         if(connect(socket,reinterpret_cast<sockaddr*>(&address),sizeof(address))==SOCKET_ERROR){closesocket(socket);WSACleanup();return 4;}
+        {int noDelay=1;setsockopt(socket,IPPROTO_TCP,TCP_NODELAY,reinterpret_cast<const char*>(&noDelay),sizeof(noDelay));}
         std::string hello=std::string("LUNA1 ")+std::to_string(PROTOCOL)+" "+argv[2];if(!frame(socket,hello,true))return 4;
         { Game game;std::string request,lastOperation;
           std::cerr<<"Bridge connected; helper PID="<<GetCurrentProcessId()<<"\n";
