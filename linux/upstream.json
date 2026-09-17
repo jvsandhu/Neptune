@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/DVS-code/Neptune",
-  "revision": "77e0926a90912fb8c7f545e7779798b0ce2dd81f",
+  "revision": "e1117f2",
   "watched_files": [
     "neptune/app.py",
     "neptune/memory/process.py",

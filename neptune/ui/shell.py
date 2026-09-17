@@ -385,7 +385,7 @@ class Shell(QWidget):
         self._update_car_name(vehicle)
         current = self.stack.currentIndex()
         for module in self.registry:
-            if not (self._pages.get(module.name) == current or module.always_refresh):
+            if not (self._pages.get(module.name) == current or module.needs_refresh()):
                 continue
             try:
                 module.refresh(vehicle)
