@@ -2,6 +2,25 @@
 from Xlib import X,display,protocol
 from Xlib.ext import shape
 
+TITLE_HINT = 'forza horizon 6'
+
+
+def choose_game_window(rows, pid):
+    """Pick the game window from `(xid, title, window_pid, area)` rows.
+
+    PID is preferred: the title is localisable and changes between game versions, while
+    `_NET_WM_PID` under Proton/XWayland is the wine process the helper already told us about.
+    The title remains the fallback for windows that do not advertise a PID.
+    """
+    if pid:
+        matched = [row for row in rows if row[2] == pid]
+        if matched:
+            return max(matched, key=lambda row: row[3])[0]
+    titled = [row for row in rows if TITLE_HINT in (row[1] or '').lower()]
+    if titled:
+        return max(titled, key=lambda row: row[3])[0]
+    return None
+
 
 def adapt_tracker(base,rect_type):
     class Tracker(base):
@@ -17,6 +36,13 @@ def adapt_tracker(base,rect_type):
         def _property(self,window,name):
             return window.get_full_property(self.connection.intern_atom(name),X.AnyPropertyType)
 
+        def _window_pid(self,window):
+            try:
+                prop=self._property(window,'_NET_WM_PID')
+                return int(prop.value[0]) if prop is not None and len(prop.value) else None
+            except Exception:
+                return None
+
         def make_overlay(self,click_through=True):
             if self.connection is None:return
             try:
@@ -29,17 +55,18 @@ def adapt_tracker(base,rect_type):
             if self.connection is None:return False
             try:
                 clients=self._property(self.root,'_NET_CLIENT_LIST')
-                choices=[]
+                rows=[]
                 for xid in clients.value if clients else []:
                     if xid==self.overlay_hwnd:continue
                     window=self.connection.create_resource_object('window',int(xid))
                     prop=self._property(window,'_NET_WM_NAME')
                     title=bytes(prop.value).decode('utf-8','replace') if prop else (window.get_wm_name() or '')
-                    if 'forza horizon 6' not in title.lower():continue
                     if window.get_attributes().map_state!=X.IsViewable:continue
                     geometry=window.get_geometry()
-                    choices.append((geometry.width*geometry.height,window))
-                self.game_hwnd=max(choices,key=lambda row:row[0])[1] if choices else None
+                    rows.append((xid,title,self._window_pid(window),geometry.width*geometry.height))
+                chosen=choose_game_window(rows,self.pid)
+                self.game_hwnd=(self.connection.create_resource_object('window',int(chosen))
+                                if chosen is not None else None)
                 self._active=self.game_hwnd is not None
                 if self._active:self.sync()
                 return self._active

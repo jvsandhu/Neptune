@@ -98,25 +98,33 @@ def adapt_process(base_class, error_class):
 
         def _cache_loop(self):
             while not self._cache_stop.wait(.05):
-                try:self._alive=self.bridge.call('ALIVE')=='1'
-                except BridgeError:self._alive=False
-                with self._cache_lock:
-                    now=time.monotonic()
-                    self._requests={key:t for key,t in self._requests.items() if now-t<2}
-                    requests=list(self._requests)
-                    self._cache={key:value for key,value in self._cache.items() if key in self._requests}
-                groups={}
-                for address,size in requests:
-                    page=address & ~4095
-                    key=(page,4096) if address+size<=page+4096 else (address,size)
-                    groups.setdefault(key,[]).append((address,size))
-                for (address,size),members in groups.items():
-                    if self._cache_stop.is_set():return
-                    try:data=self.bridge.read(address,size)
-                    except BridgeError:data=None
+                try:
+                    try:self._alive=self.bridge.call('ALIVE')=='1'
+                    except BridgeError:self._alive=False
                     with self._cache_lock:
-                        for requested,count in members:
-                            self._cache[(requested,count)]=data[requested-address:requested-address+count] if data is not None else None
+                        now=time.monotonic()
+                        self._requests={key:t for key,t in self._requests.items() if now-t<2}
+                        requests=list(self._requests)
+                        self._cache={key:value for key,value in self._cache.items() if key in self._requests}
+                    groups={}
+                    for address,size in requests:
+                        page=address & ~4095
+                        key=(page,4096) if address+size<=page+4096 else (address,size)
+                        groups.setdefault(key,[]).append((address,size))
+                    for (address,size),members in groups.items():
+                        if self._cache_stop.is_set():return
+                        try:data=self.bridge.read(address,size)
+                        except Exception:data=None
+                        with self._cache_lock:
+                            for requested,count in members:
+                                self._cache[(requested,count)]=data[requested-address:requested-address+count] if data is not None else None
+                except Exception:
+                    # A malformed frame (`bytes.fromhex` raises ValueError, not BridgeError) or any
+                    # other unexpected bridge failure must not kill this thread. If it did, `alive`
+                    # would keep reading True while the display froze on stale values. Report the
+                    # process dead so the runtime detaches instead of lying.
+                    self._alive=False
+                    self._cache_stop.wait(.05)
 
         def read(self,address,size):
             if not address or size <= 0:return None
