@@ -1,9 +1,26 @@
-import ast,struct,sys,threading,time,unittest
+import os,ast,struct,sys,threading,time,unittest
 from pathlib import Path
 from types import SimpleNamespace
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
+# Headless by default so the tests run in CI without a display.
+os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 from neptune.memory.process import Process,ProcessError
 from neptune_linux import input as inp,process
+
+
+def ensure_qt():
+    """A QApplication for the tests that build feature modules.
+
+    Some module constructors create Qt objects (audio players, timers) for their lifetime.
+    Without an application those objects outlive the interpreter and the process segfaults
+    during teardown, even though every test passed. One shared application fixes that.
+    """
+    from PySide6.QtWidgets import QApplication
+    return QApplication.instance() or QApplication([])
+
+
+def setUpModule():
+    ensure_qt()
 
 class Bridge:
     def __init__(self):self.data={};self.closed=False;self.reply='1 '+bytes(32).hex()+' 1,4096,0,255 0,0,0,0 0,0,0,0 0,0,0,0'
