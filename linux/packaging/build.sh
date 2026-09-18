@@ -24,15 +24,18 @@ xvfb-run -a .venv/bin/python linux/smoke_ui.py /tmp/captures
 echo "== package"
 bash linux/package.sh
 
-echo "== glibc baseline check"
-# The highest GLIBC symbol version any bundled ELF asks for is the oldest system this can run
-# on. Scan the libraries too, not just the bootloader, or the number is meaningless.
-required=$(find build/appimage/Neptune-linux -type f \( -name '*.so*' -o -perm -u+x \) -print0 \
-    | xargs -0 -r objdump -T 2>/dev/null \
-    | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V -u | tail -1)
-echo "   highest GLIBC symbol required: ${required:-unknown} (build host: $(ldd --version | head -1 | awk '{print $NF}'))"
-
+# Hand the artifact out first. A reporting step must never be able to lose a good build.
 mkdir -p /out
 cp dist/Neptune.AppImage /out/
 ( cd /out && sha256sum Neptune.AppImage > Neptune.AppImage.sha256 )
 echo "== wrote /out/Neptune.AppImage"
+
+echo "== glibc baseline check"
+# The highest GLIBC symbol version any bundled ELF asks for is the oldest system this can run
+# on. Scan the libraries too, not just the bootloader, or the number is meaningless. Keep this
+# non-fatal: it reports, it does not gate the build.
+symbols=$(find build/appimage/Neptune-linux -type f \( -name '*.so*' -o -perm -u+x \) -print0 \
+    | xargs -0 -r objdump -T 2>/dev/null \
+    | grep -oE 'GLIBC_[0-9]+\.[0-9]+' || true)
+highest=$(printf '%s\n' "$symbols" | sort -V -u | tail -1)
+echo "   highest GLIBC symbol required: ${highest:-unknown} (build host: $(ldd --version | head -1 | awk '{print $NF}'))"

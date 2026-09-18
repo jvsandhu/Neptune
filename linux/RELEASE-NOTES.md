@@ -1,6 +1,23 @@
-# Neptune on Linux
+# Neptune on Linux 1.0.1
 
-Based on upstream **v1.1.5** (`e1117f2`).
+Based on upstream **v1.1.5** (`e1117f2`). The Linux build carries its own version so fixes can
+ship without waiting for an upstream release.
+
+## Changes in 1.0.1
+
+- **Rev limit actually works now.** The slider only ever wrote `MAX_CLAMP`, which is the upper
+  bound the torque curve gets sampled to, so the engine kept cutting at its stock rpm no matter
+  where you put it. It now writes `THRESH` and `NEG_CLAMP` as well, which are where the engine
+  really limits and cuts. On the test car, raising only `THRESH` moved the cut from 7000 to 7500
+  (bounded by `NEG_CLAMP`), and raising all three at 12000 reached 12083 rpm.
+- **Release builds come from a container** (Debian 12, glibc 2.36) instead of whatever machine
+  happened to build them, so the artifact runs on Debian 12, Ubuntu 23.04/24.04 and newer.
+
+Worth knowing about the rev limit: it raises where the engine cuts and extends the torque curve
+conservatively. It does not add power. In neutral the engine will reach the new limit because
+there is no load; in gear it still has to pull there, and past the stock curve the extension
+declines on purpose. If you want it to pull to the new limit, raise the Torque multiplier or
+shape the torque graph.
 
 Neptune is a Windows tool. This is it running natively on Linux: same UI, same feature modules,
 same offsets. A small C++ helper runs inside the game's Proton prefix and does the Windows-only
