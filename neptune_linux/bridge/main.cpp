@@ -1,5 +1,11 @@
 // MIT; native Proton bridge. No CLR, managed assemblies, or browser runtime.
 #define WIN32_LEAN_AND_MEAN
+// GetTickCount64 (used for input polling) is Vista or newer, and there is no reason to support
+// anything older. Set it explicitly: mingw's default target varies by distribution, and the
+// older one on Ubuntu 22.04 does not declare the symbol without this. Windows 7 is the floor.
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601
+#endif
 #include <winsock2.h>
 #include <windows.h>
 #include <tlhelp32.h>
