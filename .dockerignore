@@ -1,0 +1,8 @@
+# Keep the release build context small; the 674 MB venv and build output never belong in it.
+.git
+.venv
+build
+dist
+**/__pycache__
+**/*.pyc
+linux/ui-captures
