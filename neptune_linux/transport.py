@@ -7,6 +7,7 @@ import shutil
 import socket
 import struct
 import subprocess
+import sys
 import threading
 import time
 
@@ -89,9 +90,22 @@ class Bridge:
         token = secrets.token_hex(32)
         process = None
         try:
+            # PyInstaller's bootloader injects its _internal/ directory into
+            # LD_LIBRARY_PATH for the frozen process.  When Neptune spawns
+            # protontricks-launch, the child inherits this contaminated path
+            # and may load incompatible shared libraries (libffi, libcrypto,
+            # libdbus, …).  Restore the pre-PyInstaller environment so
+            # external processes see system libraries only.
+            env = os.environ.copy()
+            orig_ld = env.pop('LD_LIBRARY_PATH_ORIG', None)
+            if orig_ld is not None:
+                env['LD_LIBRARY_PATH'] = orig_ld
+            elif getattr(sys, 'frozen', False):
+                env.pop('LD_LIBRARY_PATH', None)
             process = subprocess.Popen([executable, '--appid', appid, str(helper),
                                         str(listener.getsockname()[1]), token],
-                                       cwd=helper.parent, stdout=log, stderr=log)
+                                       cwd=helper.parent, stdout=log, stderr=log,
+                                       env=env)
             deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
                 listener.settimeout(min(1, max(0.01, deadline - time.monotonic())))
