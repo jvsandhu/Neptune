@@ -217,6 +217,8 @@ class MultiplierCarryTests(unittest.TestCase):
             rev_ceiling=7500.0
             redline=7300.0
             idle_rpm=900.0
+            shift_threshold=7200.0
+            neg_clamp=7400.0
             def curve(self):return [1.0,2.0,3.0]
         module=EngineModule(None)
         module._torque_multiplier=1.2
@@ -687,6 +689,59 @@ class HelloProtocolTests(unittest.TestCase):
         self.assertEqual(parse_hello('HELLO abc123'),(None,None))
         self.assertEqual(parse_hello('LUNA1'),(None,None))
         self.assertEqual(parse_hello('LUNA1 xyz abc'),(None,None))
+
+
+class RevLimitTests(unittest.TestCase):
+    """The limiter is three engine-model fields, not one.
+
+    The feature only ever wrote MAX_CLAMP (the curve's sampling bound), so a car with the
+    slider maxed still cut at its stock rpm. Confirmed live: raising THRESH alone moved the
+    cut to NEG_CLAMP, and raising all three let the engine reach the selected value.
+    """
+
+    def _module(self):
+        from neptune.features.engine import EngineModule
+        class Settings:
+            def get(self,*args,**kwargs):return None
+            def __getattr__(self,name):return lambda *args,**kwargs:None
+        return EngineModule(Settings())
+
+    def _recorder(self):
+        calls={}
+        class Vehicle:
+            def set_rev_ceiling(self,rpm):calls['max_clamp']=rpm;return True
+            def set_shift_threshold(self,rpm):calls['thresh']=rpm;return True
+            def set_neg_clamp(self,rpm):calls['neg_clamp']=rpm;return True
+        return Vehicle(),calls
+
+    def test_setting_a_limit_writes_all_three(self):
+        module=self._module()
+        vehicle,calls=self._recorder()
+        module._write_rev_limits(vehicle,9000.0)
+        self.assertEqual(calls,{'max_clamp':9000.0,'thresh':9000.0,'neg_clamp':9000.0})
+
+    def test_clearing_the_limit_restores_all_three(self):
+        module=self._module()
+        module.stock_ceiling=8000.0
+        module.stock_thresh=7000.0
+        module.stock_neg_clamp=7500.0
+        vehicle,calls=self._recorder()
+        module._write_rev_limits(vehicle,None)
+        self.assertEqual(calls,{'max_clamp':8000.0,'thresh':7000.0,'neg_clamp':7500.0})
+
+    def test_stock_capture_records_thresh_and_neg_clamp(self):
+        module=self._module()
+        class Vehicle:
+            rev_ceiling=8000.0
+            redline=7000.0
+            shift_threshold=7000.0
+            neg_clamp=7500.0
+            def curve(self):return [1.0,2.0]
+            idle_rpm=800.0
+        module.on_attach(Vehicle())
+        self.assertEqual(module.stock_thresh,7000.0)
+        self.assertEqual(module.stock_neg_clamp,7500.0)
+
 
 
 
