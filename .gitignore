@@ -23,6 +23,16 @@ release/
 # release repo. Keep that split in mind before changing this file.
 maybach audio/
 
+# Local Linux planning notes: written for us, not upstream. Kept on disk and in the
+# handover bundle, but not committed to the port branch or a PR.
+/DESIGN.md
+/PORT-BEHAVIOR.md
+/PORT-FIXES.md
+/PORT-PLATFORM.md
+/UX-CONTRACT.md
+/Neptune.desktop
+/linux/FORK-WORKFLOW.md
+
 # Linux port build artifacts
 neptune_linux/*.exe
 linux/ui-captures/
