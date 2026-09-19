@@ -330,9 +330,6 @@ class EngineModule(FeatureModule):
         self._engaged = False
         self._ready = False
         self._launch_engaged = False
-        # Keep the torque multiplier. It is a relative factor, so it re-applies to the new
-        # car's own stock curve instead of carrying the old car's absolute values across.
-        # The car-specific absolute state (rev limit, custom curve) is cleared.
         self._cancel_launch_handoff()
         # The torque multiplier is a RELATIVE factor, so it carries across cars: it
         # re-applies to the new car's own stock curve. Everything below it is absolute
