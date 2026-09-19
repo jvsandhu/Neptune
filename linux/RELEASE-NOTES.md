@@ -1,13 +1,14 @@
-# Neptune on Linux 1.0.1
+# Neptune on Linux 1.1.6-linux.1
 
-Based on upstream Neptune **v1.1.5**. The Linux build carries its own version so fixes can ship
-without waiting for an upstream release.
+Based on upstream Neptune **v1.1.6**. The Linux build carries its own version so fixes can ship
+without waiting for an upstream release. The `linux.N` counter goes up for each Linux-only
+build; the upstream version stays as it is.
 
 ## Install
 
 1. Install `protontricks` (Arch/CachyOS: `sudo pacman -S protontricks`, Debian/Ubuntu:
    `sudo apt install protontricks`).
-2. Download `Neptune-1.1.5-linux.1.0.1-x86_64.AppImage` from the release assets.
+2. Download `Neptune-1.1.6-linux.1-x86_64.AppImage` from the release assets.
 3. Make it executable. Right-click and choose "Allow executing file as program", or run
    `chmod +x` on it.
 4. Start Forza Horizon 6 first, then double-click the AppImage.
@@ -21,6 +22,12 @@ bundled. Settings live in `~/.local/share/neptune-native`, and the helper log is
 To update, download the new AppImage. It does not self-update.
 
 ## Changes
+
+### 1.1.6-linux.1
+
+- Merged upstream v1.1.6 (Boost Map 2.0, suspension toggles, build 440.853).
+- The grip sliders, the loaded car's name and the rev-limit fix now come from upstream, so the
+  Linux build no longer carries them as separate patches.
 
 ### 1.0.1
 

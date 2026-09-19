@@ -27,6 +27,7 @@ from neptune.ui import theme as T
 from neptune.ui.page import Page
 from neptune.ui.widgets.buttons import Button
 from neptune.ui.widgets.iconbutton import IconButton, load_icon, tinted
+from neptune.ui.widgets.marquee import MarqueeLabel
 from neptune.ui.widgets.overlaypanel import OverlayPanel
 from neptune.ui.widgets.wordmark import Wordmark
 
@@ -184,7 +185,7 @@ class Shell(QWidget):
         layout.addLayout(self._nav_layout)
         layout.addStretch(1)
 
-        self.car_name = QLabel("No car loaded")
+        self.car_name = MarqueeLabel("No car loaded")
         self.car_name.setObjectName("CarName")
         self.car_name.setContentsMargins(4, 0, 4, 6)
         layout.addWidget(self.car_name)
@@ -397,9 +398,9 @@ class Shell(QWidget):
         if vehicle is None:
             self._set_text(self.car_name, "No car loaded")
             return
-        record = vehicle.car_config
-        car_id = vehicle.process.i32(record + O.CarConfig.CAR_ID) if record else None
-        self._set_text(self.car_name, carnames.label(vehicle.media_name, car_id, "--"))
+        # `Vehicle.car_id` already reads this from the customization record, with the
+        # record-missing case handled; re-reading the offset here would duplicate it.
+        self._set_text(self.car_name, carnames.label(vehicle.media_name, vehicle.car_id, "--"))
 
     def _enable_dark_titlebar(self) -> None:
         if sys.platform != "win32":

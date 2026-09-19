@@ -220,6 +220,8 @@ class MultiplierCarryTests(unittest.TestCase):
             shift_threshold=7200.0
             neg_clamp=7400.0
             def curve(self):return [1.0,2.0,3.0]
+            def set_curve(self,curve):self.written=list(curve);return True
+            def set_curve_count(self,count):return True
         module=EngineModule(None)
         module._torque_multiplier=1.2
         module._custom_curve=[9.0,9.0]
@@ -297,10 +299,23 @@ class GripSliderTests(unittest.TestCase):
             def set_f32(self,address,value):self.mem[address]=value;return True
         class Vehicle:
             def __init__(self):self.process=Process();self.car=0
+            def wheel_read(self,field):
+                values=[]
+                for i in range(O.Wheels.COUNT):
+                    value=self.process.f32(O.Wheels.addr(self.car,i,field))
+                    if value is None:return None
+                    values.append(value)
+                return values
+            def wheel_write(self,field,values):
+                ok=True
+                for i,value in enumerate(values[:O.Wheels.COUNT]):
+                    ok=self.process.set_f32(O.Wheels.addr(self.car,i,field),float(value)) and ok
+                return ok
         class Settings:
             def get(self,*args,**kwargs):return None
             def __getattr__(self,name):return lambda *args,**kwargs:None
         module=SuspensionModule(Settings())
+        module._grip_enabled=True          # cards write nothing until their toggle is on
         vehicle=Vehicle()
         for i in range(O.Wheels.COUNT):
             vehicle.process.mem[O.Wheels.BASE+i*O.Wheels.STRIDE+0x0374]=0.985
@@ -369,6 +384,7 @@ class CarNameLabelTests(unittest.TestCase):
         class Vehicle:
             media_name="BMW_E36M3_97"
             car_config=0x1000
+            car_id=1234
             class process:
                 @staticmethod
                 def i32(address):return 1234
