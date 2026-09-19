@@ -219,6 +219,10 @@ class SuspensionModule(FeatureModule):
         self._grip_lateral = 1.0
         self._grip_longitudinal = 1.0
         self._grip_stock: tuple[list[float], list[float]] | None = None
+        # True while our multiplier is known to still be live on the car. Persisted, so an
+        # unclean exit with a multiplier applied can be told apart from a fresh attach; see
+        # _capture_grip_stock.
+        self._grip_applied = False
         self._last_grip_reapply = 0.0
 
         self._thread: threading.Thread | None = None
@@ -294,8 +298,11 @@ class SuspensionModule(FeatureModule):
             self._toe[i] if self._toe[i] is not None else (toe_stock[i] if toe_stock else None)
             for i in range(4)
         ]
+        # The Both slider only means something while the two match. When they differ it is
+        # left where it was rather than showing the lateral value as if it covered both.
+        grips_match = abs(self._grip_lateral - self._grip_longitudinal) < 1e-6
         for key, value in (
-            ("grip_both", self._grip_lateral),
+            ("grip_both", self._grip_lateral if grips_match else None),
             ("grip_lateral", self._grip_lateral),
             ("grip_longitudinal", self._grip_longitudinal),
             ("front", self._front_percent),
@@ -496,16 +503,29 @@ class SuspensionModule(FeatureModule):
         self.stock_track = curves
 
     def _capture_grip_stock(self, vehicle) -> None:
-        """Snapshot the per-wheel grip scale so the multipliers can re-apply from stock."""
+        """Snapshot the per-wheel grip scale so the multipliers can re-apply from stock.
+
+        The live value only *is* the stock when we are not already sitting on top of it.
+        After an unclean exit with a multiplier applied (a crash, or the tool being killed)
+        the value read here already includes it, so the stock is recovered by dividing it
+        out. Without this a 2x left applied reads back as stock and the next 2x compounds
+        to 4x. The stock is not a constant either: it varies per car and per compound.
+        """
         if vehicle is None:
             self._grip_stock = None
             return
         lateral = vehicle.wheel_read(O.Wheels.GRIP_LATERAL)
         longitudinal = vehicle.wheel_read(O.Wheels.GRIP_LONGITUDINAL)
-        if lateral and longitudinal:
-            self._grip_stock = (lateral, longitudinal)
-        else:
+        if not lateral or not longitudinal:
             self._grip_stock = None
+            return
+        if self._grip_applied:
+            if abs(self._grip_lateral) > 1e-6:
+                lateral = [value / self._grip_lateral for value in lateral]
+            if abs(self._grip_longitudinal) > 1e-6:
+                longitudinal = [value / self._grip_longitudinal for value in longitudinal]
+        self._grip_applied = False
+        self._grip_stock = (lateral, longitudinal)
 
     def _write_grip(
         self,
@@ -523,13 +543,20 @@ class SuspensionModule(FeatureModule):
         ok = vehicle.wheel_write(
             O.Wheels.GRIP_LATERAL, [value * lateral_factor for value in lateral_stock]
         )
-        return (
+        ok = (
             vehicle.wheel_write(
                 O.Wheels.GRIP_LONGITUDINAL,
                 [value * longitudinal_factor for value in longitudinal_stock],
             )
             and ok
         )
+        if ok:
+            # Remember whether our multiplier is now sitting on the car, so an unclean exit
+            # can be recovered on the next attach instead of compounding.
+            self._grip_applied = (
+                abs(lateral_factor - 1.0) > 1e-6 or abs(longitudinal_factor - 1.0) > 1e-6
+            )
+        return ok
 
     def _set_grip_enabled(self, enabled: bool) -> None:
         """Arm the grip sliders. Turning it off puts the tyres back to stock immediately."""
@@ -622,6 +649,12 @@ class SuspensionModule(FeatureModule):
         self.stock_track = [None, None, None, None]
         self._toe = [None, None, None, None]
         self.stock_toe = None
+        # Grip is a multiplier rather than an absolute, but the suspension cards all reset
+        # on a car change, so it goes back to 1.0 as well. Otherwise a 2x set on one car
+        # silently follows you to the next one.
+        self._grip_lateral = 1.0
+        self._grip_longitudinal = 1.0
+        self._grip_applied = False
         self._rear_solid_axle = None
         self._rigid_body_tires = None
         self._controls_dirty = True
@@ -744,6 +777,7 @@ class SuspensionModule(FeatureModule):
         self._grip_enabled = False
         self._grip_lateral = 1.0
         self._grip_longitudinal = 1.0
+        self._grip_applied = False
         self._controls_dirty = True
 
     def tick(self, vehicle) -> None:
@@ -756,6 +790,10 @@ class SuspensionModule(FeatureModule):
             self._capture_track_stock(vehicle)
         if self.stock_toe is None:
             self._capture_toe_stock(vehicle)
+        if self._grip_stock is None:
+            # Retried like the others: a poll can fail during a load, and without this the
+            # grip sliders stay silently inert because _write_grip has no base to scale.
+            self._capture_grip_stock(vehicle)
         if not self._enabled:
             self._edge.reset()
             for edge in self._hydraulics_edges.values():
@@ -2631,6 +2669,7 @@ class SuspensionModule(FeatureModule):
             "grip_enabled": self._grip_enabled,
             "grip_lateral": self._grip_lateral,
             "grip_longitudinal": self._grip_longitudinal,
+            "grip_applied": self._grip_applied,
         }
 
     def load_state(self, data: dict) -> None:
@@ -2740,6 +2779,9 @@ class SuspensionModule(FeatureModule):
         self._grip_enabled = bool(data.get("grip_enabled", False))
         self._grip_lateral = _number("grip_lateral", 1.0, GRIP_MIN, GRIP_MAX)
         self._grip_longitudinal = _number("grip_longitudinal", 1.0, GRIP_MIN, GRIP_MAX)
+        # Carried so an unclean exit can be recovered: if the last session left a
+        # multiplier on the car, the next _capture_grip_stock divides it back out.
+        self._grip_applied = bool(data.get("grip_applied", False))
         if self._enabled and self._grip_enabled and self._grip_live() and self._grip_stock:
             self._write_grip(self.vehicle)
 

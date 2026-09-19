@@ -371,6 +371,52 @@ class GripSliderTests(unittest.TestCase):
         self.assertEqual(module._grip_stock[0][0],stock)              # base unchanged
         self.assertAlmostEqual(vehicle.process.mem[base+0x0374],stock*2.0)
 
+    def test_car_change_resets_the_grip_multiplier(self):
+        """A multiplier set on one car must not follow you to the next."""
+        module,vehicle=self._fake()
+        module.vehicle=vehicle
+        module._capture_grip_stock(vehicle)
+        module._set_grip_lateral(1.5)
+        module._set_grip_longitudinal(1.4)
+        for name in ("_capture_stock","_capture_camber_stock","_capture_track_stock",
+                     "_capture_toe_stock","_capture_grip_stock","_check_rear_axle"):
+            setattr(module,name,lambda vehicle:None)
+        module.on_car_changed(object())
+        self.assertEqual(module._grip_lateral,1.0)
+        self.assertEqual(module._grip_longitudinal,1.0)
+
+    def test_applied_multiplier_is_recovered_as_stock(self):
+        """An unclean exit leaves the multiplier on the car; it must not compound."""
+        from neptune.memory import offsets as O
+        module,vehicle=self._fake()
+        module.vehicle=vehicle
+        module._capture_grip_stock(vehicle)          # reads stock 0.985
+        module._set_grip_lateral(1.5)
+        module._set_grip_longitudinal(1.5)
+        live=vehicle.process.mem[O.Wheels.BASE+0x0374]
+        self.assertAlmostEqual(live,0.985*1.5)       # our multiplier is on the car
+        # Next session: the multiplier is still applied, and nothing has put it back.
+        module._grip_stock=None
+        module._grip_applied=True
+        module._capture_grip_stock(vehicle)
+        self.assertAlmostEqual(module._grip_stock[0][0],0.985,places=6)
+        self.assertFalse(module._grip_applied)       # accounted for once
+
+    def test_tick_retries_the_grip_capture(self):
+        """A failed first capture must not leave the grip sliders silently inert."""
+        module,vehicle=self._fake()
+        module.vehicle=vehicle
+        module._grip_stock=None
+        module.stock=None;module.stock_camber=None;module.stock_toe=None
+        module.stock_track=[None,None,None,None]
+        module._capture_stock=lambda vehicle:None
+        module._capture_camber_stock=lambda vehicle:None
+        module._capture_track_stock=lambda vehicle:None
+        module._capture_toe_stock=lambda vehicle:None
+        module._enabled=False
+        module.tick(vehicle)
+        self.assertIsNotNone(module._grip_stock)
+
 
 class CarNameLabelTests(unittest.TestCase):
     def test_update_car_name(self):
