@@ -371,19 +371,36 @@ class GripSliderTests(unittest.TestCase):
         self.assertEqual(module._grip_stock[0][0],stock)              # base unchanged
         self.assertAlmostEqual(vehicle.process.mem[base+0x0374],stock*2.0)
 
-    def test_car_change_resets_the_grip_multiplier(self):
-        """A multiplier set on one car must not follow you to the next."""
+    def test_car_change_carries_the_grip_multiplier(self):
+        """Grip is relative, so it follows the car and re-applies to the new stock."""
         module,vehicle=self._fake()
         module.vehicle=vehicle
         module._capture_grip_stock(vehicle)
         module._set_grip_lateral(1.5)
         module._set_grip_longitudinal(1.4)
+        module._grip_enabled=True
+        writes=[]
+        module._write_grip=lambda v,l=None,lo=None:writes.append(v) or True
         for name in ("_capture_stock","_capture_camber_stock","_capture_track_stock",
                      "_capture_toe_stock","_capture_grip_stock","_check_rear_axle"):
             setattr(module,name,lambda vehicle:None)
         module.on_car_changed(object())
-        self.assertEqual(module._grip_lateral,1.0)
-        self.assertEqual(module._grip_longitudinal,1.0)
+        self.assertEqual(module._grip_lateral,1.5)
+        self.assertEqual(module._grip_longitudinal,1.4)
+        self.assertTrue(writes)                       # put straight onto the new car
+
+    def test_car_change_does_not_reapply_stock_grip(self):
+        """Nothing to carry at 1.0, so the new car is left alone."""
+        module,vehicle=self._fake()
+        module.vehicle=vehicle
+        module._grip_enabled=True
+        writes=[]
+        module._write_grip=lambda v,l=None,lo=None:writes.append(v) or True
+        for name in ("_capture_stock","_capture_camber_stock","_capture_track_stock",
+                     "_capture_toe_stock","_capture_grip_stock","_check_rear_axle"):
+            setattr(module,name,lambda vehicle:None)
+        module.on_car_changed(object())
+        self.assertFalse(writes)
 
     def test_applied_multiplier_is_recovered_as_stock(self):
         """An unclean exit leaves the multiplier on the car; it must not compound."""

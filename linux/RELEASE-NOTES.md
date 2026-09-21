@@ -28,6 +28,8 @@ To update, download the new AppImage. It does not self-update.
 - Merged upstream v1.1.6 (Boost Map 2.0, suspension toggles, build 440.853).
 - The grip sliders, the loaded car's name and the rev-limit fix now come from upstream, so the
   Linux build no longer carries them as separate patches.
+- Grip multipliers carry across a car change and re-apply to the new car's own stock values, the
+  same way the engine and turbo multipliers do. They also re-apply after a teleport.
 
 ### 1.0.1
 

@@ -649,11 +649,10 @@ class SuspensionModule(FeatureModule):
         self.stock_track = [None, None, None, None]
         self._toe = [None, None, None, None]
         self.stock_toe = None
-        # Grip is a multiplier rather than an absolute, but the suspension cards all reset
-        # on a car change, so it goes back to 1.0 as well. Otherwise a 2x set on one car
-        # silently follows you to the next one.
-        self._grip_lateral = 1.0
-        self._grip_longitudinal = 1.0
+        # Grip is a RELATIVE multiplier, so like the engine's torque multiplier it carries
+        # across cars and re-applies to the new car's own stock values. Only the applied
+        # flag is cleared: the grip in memory on the newly loaded car is raw stock, so the
+        # capture below must not divide the old multiplier back out of it.
         self._grip_applied = False
         self._rear_solid_axle = None
         self._rigid_body_tires = None
@@ -664,7 +663,18 @@ class SuspensionModule(FeatureModule):
         self._capture_track_stock(vehicle)
         self._capture_toe_stock(vehicle)
         self._capture_grip_stock(vehicle)
+        # The new stock values are in hand, so the carried multiplier goes straight on
+        # instead of waiting for the tick to notice the live value disagrees.
+        self._reapply_grip(vehicle)
         self._check_rear_axle(vehicle)
+
+    def _reapply_grip(self, vehicle) -> None:
+        """Put the current grip multipliers back on, if either is off stock."""
+        if not self._grip_enabled:
+            return
+        if abs(self._grip_lateral - 1.0) < 1e-6 and abs(self._grip_longitudinal - 1.0) < 1e-6:
+            return
+        self._write_grip(vehicle)
 
     def on_car_reloaded(self, vehicle) -> None:
         self.vehicle = vehicle
@@ -678,6 +688,7 @@ class SuspensionModule(FeatureModule):
             self._write_track()
         if any(value is not None for value in self._toe):
             self._write_toe()
+        self._reapply_grip(vehicle)
 
     def on_detach(self) -> None:
         self._bounce = False
